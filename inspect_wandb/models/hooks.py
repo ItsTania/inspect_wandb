@@ -4,6 +4,7 @@ from typing import Any
 from typing_extensions import override
 
 import wandb
+from inspect_wandb.utils.ansi import strip_ansi_from_file
 from wandb.errors import CommError
 from inspect_ai.hooks import Hooks, RunEnd, SampleEnd, TaskStart, EvalSetStart
 from inspect_ai.log import EvalSample
@@ -78,6 +79,10 @@ class WandBModelHooks(Hooks):
                         logger.warning(f"Failed to save {file} to wandb: {e}")
                 else:
                     logger.warning(f"File or folder '{file}' does not exist. Skipping wandb upload.")
+
+        # Strip ANSI codes from output.log for cleaner wandb logs
+        if self.settings is not None and self.settings.strip_ansi_from_output:
+            self._strip_ansi_from_output_log()
 
         if data.exception is not None and isinstance(data.exception, KeyboardInterrupt):
             logger.error("Inspect exited due to KeyboardInterrupt")
@@ -222,3 +227,18 @@ class WandBModelHooks(Hooks):
             return None
         overrides = {k[len("inspect_wandb_models_"):]: v for k,v in data.spec.metadata.items() if k.lower().startswith("inspect_wandb_models_")}
         return overrides
+
+    def _strip_ansi_from_output_log(self) -> None:
+        """
+        Strip ANSI escape codes from wandb's output.log file.
+
+        This makes the Logs tab in wandb readable when running Inspect AI
+        with rich/full display mode, by removing terminal formatting codes.
+        """
+        try:
+            output_log_path = Path(self.run.dir) / "output.log"
+            if output_log_path.exists():
+                strip_ansi_from_file(str(output_log_path))
+                logger.debug("Stripped ANSI codes from output.log")
+        except Exception as e:
+            logger.warning(f"Failed to strip ANSI codes from output.log: {e}")

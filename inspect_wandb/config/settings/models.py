@@ -29,6 +29,7 @@ class ModelsSettings(InspectWandBBaseSettings):
 
     tags: list[str] | None = Field(default=None, description="Tags to add to the models run")
     environment_validations: EnvironmentValidations | None = Field(default=None, description="Environment variables to validate before enabling")
+    strip_ansi_from_output: bool = Field(default=True, description="Strip ANSI escape codes from output.log for cleaner logs in wandb")
 
     @field_validator("environment_validations", mode="after")
     @classmethod
