@@ -9,6 +9,7 @@ from wandb.errors import CommError
 from inspect_ai.hooks import Hooks, RunEnd, SampleEnd, TaskStart, EvalSetStart
 from inspect_ai.log import EvalSample
 from inspect_ai.scorer import CORRECT
+from inspect_ai.util._display import display_type
 from inspect_wandb.config.settings import ModelsSettings
 from inspect_wandb.config.extras_manager import INSTALLED_EXTRAS
 if INSTALLED_EXTRAS["viz"]:
@@ -31,6 +32,7 @@ class WandBModelHooks(Hooks):
     _hooks_enabled: bool | None = None
     _active_runs: dict[str, dict[str, bool | BaseException | None]] = {}
     _metadata_overrides: dict[str, Any] | None = None
+    _plain_log_path: str | None = None
 
     def __init__(self):
         if INSTALLED_EXTRAS["viz"]:
@@ -64,6 +66,21 @@ class WandBModelHooks(Hooks):
             self._active_runs[data.run_id]["exception"] = data.exception
 
         self._log_summary(data)
+
+        # Upload the terminal log file to wandb at end of run.
+        if display_type() == "full_log":
+            try:
+                from inspect_ai._display.full_log.display import default_plain_log_path
+                from pathlib import Path as _Path
+                log_path = self._plain_log_path or default_plain_log_path()
+                if _Path(log_path).exists():
+                    self.run.save(log_path, policy="now")
+                    logger.info(f"Uploaded terminal log to wandb: {log_path}")
+                else:
+                    logger.warning(f"Terminal log not found, skipping upload: {log_path}")
+            except Exception as e:
+                logger.warning(f"Could not upload terminal log: {e}")
+            self._plain_log_path = None
 
         if self.settings is not None and self.settings.viz and self.viz_writer is not None:
             await self.viz_writer.log_scores_heatmap(data, self.run)
@@ -132,14 +149,30 @@ class WandBModelHooks(Hooks):
 
         # Lazy initialization: only init WandB when first task starts
         if not self._wandb_initialized:
+            # Determine console capture mode for wandb.
+            # When inspect runs with display='full' or 'full_log' the Textual TUI
+            # controls the terminal and emits ANSI escape codes via sys.stdout.
+            # Leaving wandb's capture enabled would pollute the Logs tab with those
+            # codes, so we default to 'off' for those display modes.  Users can
+            # override by setting console explicitly in ModelsSettings.
+            _tui_displays = {"full", "full_log"}
+            if self.settings.console is not None:
+                resolved_console = self.settings.console
+            elif display_type() in _tui_displays:
+                resolved_console = "off"
+            else:
+                resolved_console = "auto"
+            wandb_settings = wandb.Settings(console=resolved_console)
+
             try:
                 self.run = wandb.init(
-                    id=wandb_run_id, 
+                    id=wandb_run_id,
                     name=f"Inspect eval-set: {self.eval_set_log_dir}" if self._is_eval_set else None,
-                    entity=self.settings.entity, 
+                    entity=self.settings.entity,
                     project=self.settings.project,
-                    resume="allow"
-                ) 
+                    resume="allow",
+                    settings=wandb_settings,
+                )
             except CommError as e:
                 if f"entity {self.settings.entity} not found" in str(e):
                     logger.warning(f"WandB integration disabled: invalid entity: {self.settings.entity}. {e}")
@@ -167,11 +200,21 @@ class WandBModelHooks(Hooks):
             _ = self.run.define_metric(step_metric=Metric.SAMPLES, name=Metric.ACCURACY)
             self._wandb_initialized = True
             logger.info(f"WandB initialized for task {data.spec.task}")
+
+            # If the user chose display='full_log', record the plain log path so
+            # it can be uploaded to wandb at the end of the run.
+            if display_type() == "full_log":
+                try:
+                    from inspect_ai._display.full_log.display import default_plain_log_path
+                    self._plain_log_path = default_plain_log_path()
+                    logger.info(f"Plain log will be uploaded to wandb at run end: {self._plain_log_path}")
+                except Exception as e:
+                    logger.warning(f"Could not resolve plain log path: {e}")
         
             inspect_tags = (
-                f"inspect_task:{data.spec.task}",
-                f"inspect_model:{data.spec.model}",
-                f"inspect_dataset:{data.spec.dataset.name}",
+                f"inspect_task:{data.spec.task}"[:64],
+                f"inspect_model:{data.spec.model}"[:64],
+                f"inspect_dataset:{data.spec.dataset.name}"[:64],
             )
             if self.run.tags:
                 self.run.tags = self.run.tags + inspect_tags

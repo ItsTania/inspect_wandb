@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Any
+from typing import Any, Literal
 from pydantic_settings import SettingsConfigDict
 from inspect_wandb.config.settings.base import InspectWandBBaseSettings
 import os
@@ -26,6 +26,15 @@ class ModelsSettings(InspectWandBBaseSettings):
     files: list[str] | None = Field(default=None, description="Files to upload to the models run. Paths should be relative to the wandb directory.")
     viz: bool = Field(default=False, description="Whether to enable the inspect_viz extra")
     add_metadata_to_config: bool = Field(default=True, description="Whether to add eval metadata to wandb.config")
+    console: Literal["auto", "off", "wrap", "redirect"] | None = Field(
+        default=None,
+        description=(
+            "wandb console capture mode passed to wandb.Settings(console=...). "
+            "When None (default), uses 'off' for display='full' or 'full_log' to prevent "
+            "Textual TUI ANSI codes polluting the Logs tab, and wandb's own default ('auto') "
+            "for all other display modes. Set explicitly to override this behaviour."
+        ),
+    )
 
     tags: list[str] | None = Field(default=None, description="Tags to add to the models run")
     environment_validations: EnvironmentValidations | None = Field(default=None, description="Environment variables to validate before enabling")

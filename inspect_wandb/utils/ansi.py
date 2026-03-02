@@ -72,7 +72,7 @@ def clean_tui_output(text: str) -> str:
 
     # Remove lines that are empty or only whitespace
     # But keep lines with actual content
-    cleaned_lines = []
+    cleaned_lines: list[str] = []
     prev_blank = False
 
     for line in lines:
