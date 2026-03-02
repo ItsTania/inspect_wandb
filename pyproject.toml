@@ -15,9 +15,10 @@ classifiers = [
 ]
 dependencies = [
   "inspect_ai >= 0.3.154",
+  "pre-commit>=4.3.0",
   "pydantic >= 2.12, <3",
   "pydantic-settings",
-  "wandb"
+  "wandb",
 ]
 
 [project.optional-dependencies]
