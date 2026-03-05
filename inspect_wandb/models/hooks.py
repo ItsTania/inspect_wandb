@@ -1,4 +1,7 @@
 import logging
+import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from typing_extensions import override
@@ -30,6 +33,8 @@ class WandBModelHooks(Hooks):
     _hooks_enabled: bool | None = None
     _active_runs: dict[str, dict[str, bool | BaseException | None]] = {}
     _metadata_overrides: dict[str, Any] | None = None
+    _py_log_handler: logging.FileHandler | None = None
+    _py_log_path: str | None = None
 
     def __init__(self):
         if INSTALLED_EXTRAS["viz"]:
@@ -78,6 +83,21 @@ class WandBModelHooks(Hooks):
                         logger.warning(f"Failed to save {file} to wandb: {e}")
                 else:
                     logger.warning(f"File or folder '{file}' does not exist. Skipping wandb upload.")
+
+        # Upload the Python log file to wandb and tear down the handler.
+        if self._py_log_handler is not None:
+            logging.getLogger().removeHandler(self._py_log_handler)
+            self._py_log_handler.flush()
+            self._py_log_handler.close()
+            self._py_log_handler = None
+        if self._py_log_path is not None:
+            try:
+                if Path(self._py_log_path).exists():
+                    self.run.save(self._py_log_path, policy="now")
+                    logger.info(f"Uploaded Python log to wandb: {self._py_log_path}")
+            except Exception as e:
+                logger.warning(f"Could not upload Python log: {e}")
+            self._py_log_path = None
 
         if data.exception is not None and isinstance(data.exception, KeyboardInterrupt):
             logger.error("Inspect exited due to KeyboardInterrupt")
@@ -129,12 +149,12 @@ class WandBModelHooks(Hooks):
         if not self._wandb_initialized:
             try:
                 self.run = wandb.init(
-                    id=wandb_run_id, 
+                    id=wandb_run_id,
                     name=f"Inspect eval-set: {self.eval_set_log_dir}" if self._is_eval_set else None,
-                    entity=self.settings.entity, 
+                    entity=self.settings.entity,
                     project=self.settings.project,
-                    resume="allow"
-                ) 
+                    resume="allow",
+                )
             except CommError as e:
                 if f"entity {self.settings.entity} not found" in str(e):
                     logger.warning(f"WandB integration disabled: invalid entity: {self.settings.entity}. {e}")
@@ -162,6 +182,22 @@ class WandBModelHooks(Hooks):
             _ = self.run.define_metric(step_metric=Metric.SAMPLES, name=Metric.ACCURACY)
             self._wandb_initialized = True
             logger.info(f"WandB initialized for task {data.spec.task}")
+
+            # Capture Python logging (DEBUG+) to a plain-text file and upload to wandb.
+            try:
+                ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                suffix = uuid.uuid4().hex[:8]
+                os.makedirs("logs", exist_ok=True)
+                self._py_log_path = os.path.join("logs", f"py_log_{ts}_{suffix}.txt")
+                self._py_log_handler = logging.FileHandler(self._py_log_path, mode="w")
+                self._py_log_handler.setLevel(logging.DEBUG)
+                self._py_log_handler.setFormatter(
+                    logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+                )
+                logging.getLogger().addHandler(self._py_log_handler)
+                logger.info(f"Python log capture started: {self._py_log_path}")
+            except Exception as e:
+                logger.warning(f"Could not set up Python log capture: {e}")
         
             inspect_tags = (
                 f"inspect_task:{data.spec.task}",
