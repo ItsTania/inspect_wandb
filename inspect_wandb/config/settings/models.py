@@ -27,6 +27,14 @@ class ModelsSettings(InspectWandBBaseSettings):
     viz: bool = Field(default=False, description="Whether to enable the inspect_viz extra")
     add_metadata_to_config: bool = Field(default=True, description="Whether to add eval metadata to wandb.config")
 
+    capture_python_logs: bool | None = Field(
+        default=None,
+        description=(
+            "Capture Python logging to a file and upload to wandb. "
+            "None (default) auto-detects: True for display='full' (TUI) where console wrap "
+            "would produce messy ANSI output, False for all other displays."
+        ),
+    )
     tags: list[str] | None = Field(default=None, description="Tags to add to the models run")
     environment_validations: EnvironmentValidations | None = Field(default=None, description="Environment variables to validate before enabling")
 

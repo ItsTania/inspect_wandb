@@ -11,6 +11,7 @@ from wandb.errors import CommError
 from inspect_ai.hooks import Hooks, RunEnd, SampleEnd, TaskStart, EvalSetStart
 from inspect_ai.log import EvalSample
 from inspect_ai.scorer import CORRECT
+from inspect_ai.util._display import display_type
 from inspect_wandb.config.settings import ModelsSettings
 from inspect_wandb.config.extras_manager import INSTALLED_EXTRAS
 if INSTALLED_EXTRAS["viz"]:
@@ -147,6 +148,12 @@ class WandBModelHooks(Hooks):
 
         # Lazy initialization: only init WandB when first task starts
         if not self._wandb_initialized:
+            # Auto-detect: use FileHandler (and suppress wandb console capture) when
+            # running under the Textual TUI ("full") to avoid ANSI noise in wandb logs.
+            capture = self.settings.capture_python_logs
+            use_file_handler = capture if capture is not None else (display_type() == "full")
+            console_mode = "off" if use_file_handler else "auto"
+
             try:
                 self.run = wandb.init(
                     id=wandb_run_id,
@@ -154,6 +161,7 @@ class WandBModelHooks(Hooks):
                     entity=self.settings.entity,
                     project=self.settings.project,
                     resume="allow",
+                    settings=wandb.Settings(console=console_mode),
                 )
             except CommError as e:
                 if f"entity {self.settings.entity} not found" in str(e):
@@ -184,20 +192,21 @@ class WandBModelHooks(Hooks):
             logger.info(f"WandB initialized for task {data.spec.task}")
 
             # Capture Python logging (DEBUG+) to a plain-text file and upload to wandb.
-            try:
-                ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-                suffix = uuid.uuid4().hex[:8]
-                os.makedirs("logs", exist_ok=True)
-                self._py_log_path = os.path.join("logs", f"py_log_{ts}_{suffix}.txt")
-                self._py_log_handler = logging.FileHandler(self._py_log_path, mode="w")
-                self._py_log_handler.setLevel(logging.DEBUG)
-                self._py_log_handler.setFormatter(
-                    logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-                )
-                logging.getLogger().addHandler(self._py_log_handler)
-                logger.info(f"Python log capture started: {self._py_log_path}")
-            except Exception as e:
-                logger.warning(f"Could not set up Python log capture: {e}")
+            if use_file_handler:
+                try:
+                    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                    suffix = uuid.uuid4().hex[:8]
+                    os.makedirs("logs", exist_ok=True)
+                    self._py_log_path = os.path.join("logs", f"py_log_{ts}_{suffix}.txt")
+                    self._py_log_handler = logging.FileHandler(self._py_log_path, mode="w")
+                    self._py_log_handler.setLevel(logging.DEBUG)
+                    self._py_log_handler.setFormatter(
+                        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+                    )
+                    logging.getLogger().addHandler(self._py_log_handler)
+                    logger.info(f"Python log capture started: {self._py_log_path}")
+                except Exception as e:
+                    logger.warning(f"Could not set up Python log capture: {e}")
         
             inspect_tags = (
                 f"inspect_task:{data.spec.task}",
