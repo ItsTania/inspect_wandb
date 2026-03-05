@@ -25,10 +25,15 @@ ANSI_PATTERN = re.compile(
     r"\x1b."  # Other two-character escapes
 )
 
+# Raw control characters (non-printable, non-whitespace) emitted by TUI frameworks
+# such as Textual/Rich that are not \x1b-prefixed escape sequences.
+# Keeps: \t (0x09), \n (0x0a), \r (0x0d)
+CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
 
 def strip_ansi(text: str) -> str:
     """
-    Remove ANSI escape codes from text.
+    Remove ANSI escape codes and raw control characters from text.
 
     This handles common terminal escape sequences including:
     - Color codes (foreground/background colors)
@@ -37,14 +42,15 @@ def strip_ansi(text: str) -> str:
     - Screen clearing
     - Terminal title sequences
     - Hyperlinks (OSC 8)
+    - Raw control characters emitted by TUI frameworks (e.g. Textual/Rich)
 
     Args:
         text: Input text potentially containing ANSI escape codes.
 
     Returns:
-        Text with all ANSI escape codes removed.
+        Text with all ANSI escape codes and control characters removed.
     """
-    return ANSI_PATTERN.sub("", text)
+    return CONTROL_CHAR_PATTERN.sub("", ANSI_PATTERN.sub("", text))
 
 
 def clean_tui_output(text: str) -> str:

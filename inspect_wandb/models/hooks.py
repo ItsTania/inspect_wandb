@@ -150,12 +150,10 @@ class WandBModelHooks(Hooks):
         # Lazy initialization: only init WandB when first task starts
         if not self._wandb_initialized:
             # Determine console capture mode for wandb.
-            # When inspect runs with display='full' or 'full_log' the Textual TUI
-            # controls the terminal and emits ANSI escape codes via sys.stdout.
-            # Leaving wandb's capture enabled would pollute the Logs tab with those
-            # codes, so we default to 'off' for those display modes.  Users can
-            # override by setting console explicitly in ModelsSettings.
-            _tui_displays = {"full", "full_log"}
+            # When inspect runs with display='full_log' it writes plain text to a
+            # log file, so we default console capture to 'off' to avoid interference.
+            # Users can override by setting console explicitly in ModelsSettings.
+            _tui_displays = {"full_log"}
             if self.settings.console is not None:
                 resolved_console = self.settings.console
             elif display_type() in _tui_displays:
