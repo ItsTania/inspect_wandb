@@ -62,9 +62,9 @@ class WandBModelHooks(InspectWandBHooks):
         # Upload the terminal log file to wandb at end of run.
         if display_type() == "full_log":
             try:
-                from inspect_ai._display.full_log.display import default_plain_log_path
+                from inspect_ai._display.full_log.display import default_log_file_path
                 from pathlib import Path as _Path
-                log_path = self._plain_log_path or default_plain_log_path()
+                log_path = self._plain_log_path or default_log_file_path()
                 if _Path(log_path).exists():
                     self.run.save(log_path, policy="now")
                     logger.info(f"Uploaded terminal log to wandb: {log_path}")
@@ -182,8 +182,8 @@ class WandBModelHooks(InspectWandBHooks):
             # it can be uploaded to wandb at the end of the run.
             if display_type() == "full_log":
                 try:
-                    from inspect_ai._display.full_log.display import default_plain_log_path
-                    self._plain_log_path = default_plain_log_path()
+                    from inspect_ai._display.full_log.display import default_log_file_path
+                    self._plain_log_path = default_log_file_path()
                     logger.info(f"Plain log will be uploaded to wandb at run end: {self._plain_log_path}")
                 except Exception as e:
                     logger.warning(f"Could not resolve plain log path: {e}")
