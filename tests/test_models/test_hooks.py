@@ -364,6 +364,147 @@ class TestWandBModelHooks:
         mock_logger.warning.assert_called_with("Failed to save test-file.txt to wandb: Upload failed")
 
     @pytest.mark.asyncio
+    async def test_plain_log_path_set_on_task_start_when_full_log_display(self, mock_wandb_run: Run, create_task_start: Callable[dict | None, TaskStart], initialise_wandb: None) -> None:
+        # Given
+        hooks = WandBModelHooks()
+        hooks.enabled()
+        mock_init = MagicMock(return_value=mock_wandb_run)
+        task_start = create_task_start()
+        # default_log_file_path is imported at execution time inside the method,
+        # so we mock the module in sys.modules to make the import succeed.
+        mock_module = MagicMock()
+        mock_module.default_log_file_path = MagicMock(return_value="/tmp/inspect.log")
+
+        # When
+        with patch('inspect_wandb.models.hooks.init', mock_init), \
+             patch('inspect_wandb.models.hooks.display_type', return_value="full_log"), \
+             patch.dict('sys.modules', {'inspect_ai._display.full_log.display': mock_module}):
+            await hooks.on_task_start(task_start)
+
+        # Then
+        assert hooks._plain_log_path == "/tmp/inspect.log"
+
+    @pytest.mark.asyncio
+    async def test_plain_log_path_not_set_when_not_full_log_display(self, mock_wandb_run: Run, create_task_start: Callable[dict | None, TaskStart], initialise_wandb: None) -> None:
+        # Given
+        hooks = WandBModelHooks()
+        hooks.enabled()
+        mock_init = MagicMock(return_value=mock_wandb_run)
+        task_start = create_task_start()
+
+        # When
+        with patch('inspect_wandb.models.hooks.init', mock_init), \
+             patch('inspect_wandb.models.hooks.display_type', return_value="full"):
+            await hooks.on_task_start(task_start)
+
+        # Then
+        assert hooks._plain_log_path is None
+
+    @pytest.mark.asyncio
+    async def test_log_file_uploaded_on_run_end_when_full_log_display(self, mock_wandb_run: Run) -> None:
+        # Given
+        hooks = WandBModelHooks()
+        hooks.run = mock_wandb_run
+        hooks.settings = ModelsSettings(
+            enabled=True,
+            entity="test-entity",
+            project="test-project",
+        )
+        hooks._hooks_enabled = True
+        hooks._wandb_initialized = True
+        hooks._active_runs = {"test-run": {"running": True, "exception": None}}
+        hooks._plain_log_path = "/tmp/inspect.log"
+        # default_log_file_path is imported at execution time inside the method,
+        # so we mock the module in sys.modules to make the import succeed.
+        mock_module = MagicMock()
+        mock_module.default_log_file_path = MagicMock(return_value="/tmp/inspect.log")
+
+        # When
+        with patch('inspect_wandb.models.hooks.display_type', return_value="full_log"), \
+             patch('inspect_wandb.models.hooks.Path') as mock_path_cls, \
+             patch.dict('sys.modules', {'inspect_ai._display.full_log.display': mock_module}):
+            mock_path_cls.return_value.exists.return_value = True
+            await hooks.on_run_end(
+                RunEnd(
+                    eval_set_id=None,
+                    run_id="test-run",
+                    exception=None,
+                    logs=[]
+                )
+            )
+
+        # Then
+        hooks.run.save.assert_called_once_with("/tmp/inspect.log", policy="now")
+        # Verify path is reset after upload to avoid re-uploading on subsequent runs
+        assert hooks._plain_log_path is None
+
+    @pytest.mark.asyncio
+    async def test_log_file_not_uploaded_when_not_full_log_display(self, mock_wandb_run: Run) -> None:
+        # Given
+        hooks = WandBModelHooks()
+        hooks.run = mock_wandb_run
+        hooks.settings = ModelsSettings(
+            enabled=True,
+            entity="test-entity",
+            project="test-project",
+        )
+        hooks._hooks_enabled = True
+        hooks._wandb_initialized = True
+        hooks._active_runs = {"test-run": {"running": True, "exception": None}}
+
+        # When
+        with patch('inspect_wandb.models.hooks.display_type', return_value="full"):
+            await hooks.on_run_end(
+                RunEnd(
+                    eval_set_id=None,
+                    run_id="test-run",
+                    exception=None,
+                    logs=[]
+                )
+            )
+
+        # Then
+        hooks.run.save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_log_file_warning_when_file_missing(self, mock_wandb_run: Run) -> None:
+        # Given
+        hooks = WandBModelHooks()
+        hooks.run = mock_wandb_run
+        hooks.settings = ModelsSettings(
+            enabled=True,
+            entity="test-entity",
+            project="test-project",
+        )
+        hooks._hooks_enabled = True
+        hooks._wandb_initialized = True
+        hooks._active_runs = {"test-run": {"running": True, "exception": None}}
+        hooks._plain_log_path = "/tmp/missing.log"
+        # default_log_file_path is imported at execution time inside the method,
+        # so we mock the module in sys.modules to make the import succeed.
+        mock_module = MagicMock()
+        mock_module.default_log_file_path = MagicMock(return_value="/tmp/missing.log")
+
+        # When
+        with patch('inspect_wandb.models.hooks.display_type', return_value="full_log"), \
+             patch('inspect_wandb.models.hooks.Path') as mock_path_cls, \
+             patch('inspect_wandb.models.hooks.logger') as mock_logger, \
+             patch.dict('sys.modules', {'inspect_ai._display.full_log.display': mock_module}):
+            mock_path_cls.return_value.exists.return_value = False
+            await hooks.on_run_end(
+                RunEnd(
+                    eval_set_id=None,
+                    run_id="test-run",
+                    exception=None,
+                    logs=[]
+                )
+            )
+
+        # Then
+        hooks.run.save.assert_not_called()
+        mock_logger.warning.assert_any_call("Terminal log not found, skipping upload: /tmp/missing.log")
+
+    @pytest.mark.asyncio
     async def test_multiple_files_mixed_existence(self, mock_wandb_run: Run) -> None:
         """Test handling multiple files with mixed existence"""
         # Given
