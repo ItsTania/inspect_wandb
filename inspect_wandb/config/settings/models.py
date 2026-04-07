@@ -20,6 +20,17 @@ class ModelsSettings(InspectWandBBaseSettings):
     files: list[str] | None = Field(default=None, description="Files to upload to the models run. Paths should be relative to the wandb directory.")
     viz: bool = Field(default=False, description="Whether to enable the inspect_viz extra")
     add_metadata_to_config: bool = Field(default=True, description="Whether to add eval metadata to wandb.config")
+    capture_console: bool | None = Field(
+        default=None,
+        description=(
+            "Control wandb console output capture via the wandb.Settings console parameter. "
+            "None (default) auto-detects: explicitly disables capture for 'full' and 'full_log' "
+            "display modes (where logs are written to files), leaves as wandb default ('auto') otherwise. "
+            "Set True to force the wandb 'auto' setting (which typically means capture is enabled), "
+            "False to force capture off. "
+            "Useful for controlling whether rich terminal output gets uploaded."
+        ),
+    )
 
     tags: list[str] | None = Field(default=None, description="Tags to add to the models run")
     environment_validations: EnvironmentValidations | None = Field(default=None, description="Environment variables to validate before enabling")

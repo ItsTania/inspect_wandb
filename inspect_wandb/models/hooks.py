@@ -63,9 +63,8 @@ class WandBModelHooks(InspectWandBHooks):
         if display_type() == "full_log":
             try:
                 from inspect_ai._display.full_log.display import default_log_file_path
-                from pathlib import Path as _Path
                 log_path = self._plain_log_path or default_log_file_path()
-                if _Path(log_path).exists():
+                if Path(log_path).exists():
                     self.run.save(log_path, policy="now")
                     logger.info(f"Uploaded terminal log to wandb: {log_path}")
                 else:
@@ -130,15 +129,7 @@ class WandBModelHooks(InspectWandBHooks):
         }
 
         if not self._wandb_initialized:
-            # Determine console capture mode for wandb.
-            # When inspect runs with display='full_log' it writes plain text to a
-            # log file, so we default console capture to 'off' to avoid interference.
-            _tui_displays = {"full_log"}
-            console_mode: Literal["auto", "off", "wrap", "redirect", "wrap_raw", "wrap_emu"]
-            if display_type() in _tui_displays:
-                console_mode = "off"
-            else:
-                console_mode = "auto"
+            console_mode = self._resolve_console_mode()
             wandb_settings = wandb.Settings(console=console_mode)
 
             try:
@@ -237,4 +228,12 @@ class WandBModelHooks(InspectWandBHooks):
             return 0.0
 
         return self._correct_samples * 1.0 / self._total_samples
+
+    def _resolve_console_mode(self) -> Literal["auto", "off"]:
+        assert self.settings is not None
+        if self.settings.capture_console is not None:
+            return "auto" if self.settings.capture_console else "off"
+        if display_type() in ("full", "full_log"):
+            return "off"
+        return "auto"
 
