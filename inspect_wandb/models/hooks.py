@@ -58,6 +58,13 @@ class WandBModelHooks(InspectWandBHooks):
 
         self._log_summary(data)
 
+        # Clean up the display logger handler if it was configured
+        if hasattr(self, "_display_log_handler"):
+            logger_name = os.environ.get("INSPECT_LOG_DISPLAY_PY_LOGGER")
+            display_logger = logging.getLogger(logger_name)
+            display_logger.removeHandler(self._display_log_handler)
+            self._display_log_handler.close()
+
         if self.settings is not None and self.settings.viz and self.viz_writer is not None:
             await self.viz_writer.log_scores_heatmap(data, self.run)
 
@@ -160,6 +167,11 @@ class WandBModelHooks(InspectWandBHooks):
             self._wandb_initialized = True
             logger.info(f"WandB initialized for task {data.spec.task}")
 
+            # Configure the secondary display logger to write to a file
+            # in the wandb run directory, so it gets uploaded automatically.
+            if self._has_secondary_display_logger():
+                self._configure_display_logger()
+
             inspect_tags = (
                 f"inspect_task:{data.spec.task}",
                 f"inspect_model:{data.spec.model}",
@@ -216,4 +228,22 @@ class WandBModelHooks(InspectWandBHooks):
             os.environ.get("INSPECT_DISPLAY_SECONDARY") == "log"
             and os.environ.get("INSPECT_LOG_DISPLAY_PY_LOGGER") is not None
         )
+
+    def _configure_display_logger(self) -> None:
+        """Configure the named display logger to write to a file in the wandb run directory."""
+        logger_name = os.environ.get("INSPECT_LOG_DISPLAY_PY_LOGGER")
+        display_logger = logging.getLogger(logger_name)
+
+        # Write display log to wandb run directory so it gets uploaded
+        log_path = Path(self.run.dir) / "display.log"
+        handler = logging.FileHandler(str(log_path))
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        )
+        display_logger.addHandler(handler)
+        display_logger.propagate = False
+
+        self._display_log_handler = handler
+        self._display_log_path = log_path
+        logger.info(f"Display logger configured: writing to {log_path}")
 
