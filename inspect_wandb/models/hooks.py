@@ -58,12 +58,11 @@ class WandBModelHooks(InspectWandBHooks):
 
         self._log_summary(data)
 
-        # Clean up the display logger handler if it was configured
-        if hasattr(self, "_display_log_handler"):
-            logger_name = os.environ.get("INSPECT_LOG_DISPLAY_PY_LOGGER")
-            display_logger = logging.getLogger(logger_name)
-            display_logger.removeHandler(self._display_log_handler)
-            self._display_log_handler.close()
+        # Clean up display logger handlers if they were configured
+        if hasattr(self, "_display_log_handler_pairs"):
+            for log, handler in self._display_log_handler_pairs:
+                log.removeHandler(handler)
+                handler.close()
 
         if self.settings is not None and self.settings.viz and self.viz_writer is not None:
             await self.viz_writer.log_scores_heatmap(data, self.run)
@@ -230,20 +229,38 @@ class WandBModelHooks(InspectWandBHooks):
         )
 
     def _configure_display_logger(self) -> None:
-        """Configure the named display logger to write to a file in the wandb run directory."""
+        """Configure the named display logger to write to a file in the wandb run directory.
+
+        Adds a file handler to both the named display logger and the root
+        logger so that display output and broader Python errors/warnings
+        are captured in the same file.
+        """
         logger_name = os.environ.get("INSPECT_LOG_DISPLAY_PY_LOGGER")
         display_logger = logging.getLogger(logger_name)
 
-        # Write display log to wandb run directory so it gets uploaded
+        # Write to wandb run directory so it gets uploaded automatically
         log_path = Path(self.run.dir) / "display.log"
-        handler = logging.FileHandler(str(log_path))
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
-        display_logger.addHandler(handler)
+
+        # Display logger: captures display output (task progress, metrics, results)
+        display_file_handler = logging.FileHandler(str(log_path))
+        display_file_handler.setFormatter(formatter)
+        display_logger.addHandler(display_file_handler)
         display_logger.propagate = False
 
-        self._display_log_handler = handler
+        # Root logger: captures broader Python errors and warnings
+        root_file_handler = logging.FileHandler(str(log_path))
+        root_file_handler.setLevel(logging.WARNING)
+        root_file_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(root_file_handler)
+
+        # Track handlers and their loggers for cleanup in on_run_end
+        self._display_log_handler_pairs: list[tuple[logging.Logger, logging.Handler]] = [
+            (display_logger, display_file_handler),
+            (logging.getLogger(), root_file_handler),
+        ]
         self._display_log_path = log_path
         logger.info(f"Display logger configured: writing to {log_path}")
 
