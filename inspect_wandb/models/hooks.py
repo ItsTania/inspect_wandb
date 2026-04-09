@@ -240,7 +240,7 @@ class WandBModelHooks(InspectWandBHooks):
         display_logger = logging.getLogger(logger_name)
 
         # Write to wandb run directory so it gets uploaded automatically
-        log_path = Path(self.run.dir) / "display.log"
+        log_path = Path(self.run.dir) / "inspect_display.log"
         formatter = logging.Formatter(
             "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
