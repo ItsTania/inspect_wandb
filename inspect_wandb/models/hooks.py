@@ -169,6 +169,7 @@ class WandBModelHooks(InspectWandBHooks):
             # Configure the secondary display logger to write to a file
             # in the wandb run directory, so it gets uploaded automatically.
             if self._has_secondary_display_logger():
+                logger.info(f"Configuring display logger, run.dir = {self.run.dir}")
                 self._configure_display_logger()
 
             inspect_tags = (
