@@ -58,8 +58,12 @@ class WandBModelHooks(InspectWandBHooks):
 
         self._log_summary(data)
 
-        # Clean up display logger handlers if they were configured
+        # Upload and clean up display logger if configured
         if hasattr(self, "_display_log_handler_pairs"):
+            for _, handler in self._display_log_handler_pairs:
+                handler.flush()
+            logger.info(f"Uploading display log: {self._display_log_path}")
+            self.run.save(str(self._display_log_path), policy="now")
             for log, handler in self._display_log_handler_pairs:
                 log.removeHandler(handler)
                 handler.close()
