@@ -1,8 +1,10 @@
 import logging
+import os
 from pathlib import Path
 from typing import Any
 from typing_extensions import override
 
+import wandb
 from wandb import init, Run
 from wandb.errors import CommError
 from inspect_ai.hooks import RunEnd, SampleEnd, TaskStart, EvalSetStart
@@ -113,12 +115,22 @@ class WandBModelHooks(InspectWandBHooks):
 
         if not self._wandb_initialized:
             try:
+                # Disable wandb console capture if a secondary display logger
+                # is configured, since display output is captured via the Python logger instead.
+                # TODO: If wandb API adds support for configuring custom Python
+                # loggers, use that instead of file-based capture.
+                wandb_settings = None
+                if self._has_secondary_display_logger():
+                    wandb_settings = wandb.Settings(console="off")
+                    logger.info("WandB console capture disabled: secondary display logger is configured")
+
                 self.run = init(
                     id=wandb_run_id,
                     name=f"Inspect eval-set: {self.eval_set_log_dir}" if self._is_eval_set else None,
                     entity=self.settings.entity,
                     project=self.settings.project,
-                    resume="allow"
+                    resume="allow",
+                    settings=wandb_settings,
                 )
             except CommError as e:
                 if f"entity {self.settings.entity} not found" in str(e):
@@ -197,4 +209,11 @@ class WandBModelHooks(InspectWandBHooks):
             return 0.0
 
         return self._correct_samples * 1.0 / self._total_samples
+
+    def _has_secondary_display_logger(self) -> bool:
+        """Check if a secondary display logger is configured via env vars."""
+        return (
+            os.environ.get("INSPECT_DISPLAY_SECONDARY") == "log"
+            and os.environ.get("INSPECT_LOG_DISPLAY_PY_LOGGER") is not None
+        )
 
