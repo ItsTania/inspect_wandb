@@ -57,6 +57,9 @@ include = ["inspect_wandb*"]
 [project.entry-points.inspect_ai]
 inspect_wandb = "inspect_wandb._registry"
 
+[tool.uv.sources]
+wandb = { path = "../wandb", editable = true }
+
 [tool.ruff]
 exclude = [
     "inspect_wandb/_registry.py"

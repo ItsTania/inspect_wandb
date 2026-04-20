@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 from typing_extensions import override
 
+import wandb
 from wandb import init, Run
 from wandb.errors import CommError
 from inspect_ai.hooks import RunEnd, SampleEnd, TaskStart, EvalSetStart
@@ -86,6 +87,14 @@ class WandBModelHooks(InspectWandBHooks):
         elif last_run:
             self.run.finish(exit_code=0)
 
+        # Clean up W&B logger handlers after run.finish()
+        if hasattr(self, "_wandb_log_handler"):
+            logger.removeHandler(self._wandb_log_handler)
+            self._wandb_log_handler.close()
+        if hasattr(self, "_py_log_handler"):
+            logging.getLogger().removeHandler(self._py_log_handler)
+            self._py_log_handler.close()
+
         self._wandb_initialized = False
 
     @override
@@ -118,7 +127,8 @@ class WandBModelHooks(InspectWandBHooks):
                     name=f"Inspect eval-set: {self.eval_set_log_dir}" if self._is_eval_set else None,
                     entity=self.settings.entity,
                     project=self.settings.project,
-                    resume="allow"
+                    resume="allow",
+                    settings=wandb.Settings(console="off"), # turn off console capture for demo
                 )
             except CommError as e:
                 if f"entity {self.settings.entity} not found" in str(e):
@@ -146,6 +156,10 @@ class WandBModelHooks(InspectWandBHooks):
 
             _ = self.run.define_metric(step_metric=Metric.SAMPLES, name=Metric.ACCURACY)
             self._wandb_initialized = True
+
+            # Send inspect_wandb logger output to the W&B Logs tab
+            self._configure_wandb_logger()
+
             logger.info(f"WandB initialized for task {data.spec.task}")
 
             inspect_tags = (
@@ -197,4 +211,21 @@ class WandBModelHooks(InspectWandBHooks):
             return 0.0
 
         return self._correct_samples * 1.0 / self._total_samples
+
+    def _configure_wandb_logger(self) -> None:
+        try:
+            from wandb.sdk.lib.logger_capture import WandbLoggerHandler
+
+            formatter = logging.Formatter("%(levelname)s | %(name)s | %(message)s")
+
+            self._wandb_log_handler = WandbLoggerHandler(self.run, level=logging.INFO)
+            self._wandb_log_handler.setFormatter(formatter)
+            logger.addHandler(self._wandb_log_handler)
+            logger.setLevel(logging.DEBUG)
+
+            self._py_log_handler = WandbLoggerHandler(self.run, level=logging.DEBUG)
+            self._py_log_handler.setFormatter(formatter)
+            logging.getLogger().addHandler(self._py_log_handler)
+        except Exception as e:
+            logger.warning(f"Could not set up Python log capture: {e}")
 
