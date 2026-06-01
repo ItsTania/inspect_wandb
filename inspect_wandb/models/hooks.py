@@ -1,8 +1,10 @@
 import logging
+import os
 from pathlib import Path
 from typing import Any
 from typing_extensions import override
 
+import wandb
 from wandb import init, Run
 from wandb.errors import CommError
 from inspect_ai.hooks import RunEnd, SampleEnd, TaskStart, EvalSetStart
@@ -55,6 +57,16 @@ class WandBModelHooks(InspectWandBHooks):
             self._active_runs[data.run_id]["exception"] = data.exception
 
         self._log_summary(data)
+
+        # Upload and clean up display logger if configured
+        if hasattr(self, "_display_log_handler_pairs"):
+            for _, handler in self._display_log_handler_pairs:
+                handler.flush()
+            logger.info(f"Uploading display log: {self._display_log_path}")
+            self.run.save(str(self._display_log_path), policy="now")
+            for log, handler in self._display_log_handler_pairs:
+                log.removeHandler(handler)
+                handler.close()
 
         if self.settings is not None and self.settings.viz and self.viz_writer is not None:
             await self.viz_writer.log_scores_heatmap(data, self.run)
@@ -113,12 +125,22 @@ class WandBModelHooks(InspectWandBHooks):
 
         if not self._wandb_initialized:
             try:
+                # Disable wandb console capture if a secondary display logger
+                # is configured, since display output is captured via the Python logger instead.
+                # TODO: If wandb API adds support for configuring custom Python
+                # loggers, use that instead of file-based capture.
+                wandb_settings = None
+                if self._has_secondary_display_logger():
+                    wandb_settings = wandb.Settings(console="off")
+                    logger.info("WandB console capture disabled: secondary display logger is configured")
+
                 self.run = init(
                     id=wandb_run_id,
                     name=f"Inspect eval-set: {self.eval_set_log_dir}" if self._is_eval_set else None,
                     entity=self.settings.entity,
                     project=self.settings.project,
-                    resume="allow"
+                    resume="allow",
+                    settings=wandb_settings,
                 )
             except CommError as e:
                 if f"entity {self.settings.entity} not found" in str(e):
@@ -147,6 +169,12 @@ class WandBModelHooks(InspectWandBHooks):
             _ = self.run.define_metric(step_metric=Metric.SAMPLES, name=Metric.ACCURACY)
             self._wandb_initialized = True
             logger.info(f"WandB initialized for task {data.spec.task}")
+
+            # Configure the secondary display logger to write to a file
+            # in the wandb run directory, so it gets uploaded automatically.
+            if self._has_secondary_display_logger():
+                logger.info(f"Configuring display logger, run.dir = {self.run.dir}")
+                self._configure_display_logger()
 
             inspect_tags = (
                 f"inspect_task:{data.spec.task}",
@@ -197,4 +225,47 @@ class WandBModelHooks(InspectWandBHooks):
             return 0.0
 
         return self._correct_samples * 1.0 / self._total_samples
+
+    def _has_secondary_display_logger(self) -> bool:
+        """Check if a secondary display logger is configured via env vars."""
+        return (
+            os.environ.get("INSPECT_DISPLAY_SECONDARY") == "log"
+            and os.environ.get("INSPECT_LOG_DISPLAY_PY_LOGGER") is not None
+        )
+
+    def _configure_display_logger(self) -> None:
+        """Configure the named display logger to write to a file in the wandb run directory.
+
+        Adds a file handler to both the named display logger and the root
+        logger so that display output and broader Python errors/warnings
+        are captured in the same file.
+        """
+        logger_name = os.environ.get("INSPECT_LOG_DISPLAY_PY_LOGGER")
+        display_logger = logging.getLogger(logger_name)
+
+        # Write to wandb run directory so it gets uploaded automatically
+        log_path = Path(self.run.dir) / "inspect_display.log"
+        formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        )
+
+        # Display logger: captures display output (task progress, metrics, results)
+        display_file_handler = logging.FileHandler(str(log_path))
+        display_file_handler.setFormatter(formatter)
+        display_logger.addHandler(display_file_handler)
+        display_logger.propagate = False
+
+        # Root logger: captures broader Python errors and warnings
+        root_file_handler = logging.FileHandler(str(log_path))
+        root_file_handler.setLevel(logging.WARNING)
+        root_file_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(root_file_handler)
+
+        # Track handlers and their loggers for cleanup in on_run_end
+        self._display_log_handler_pairs: list[tuple[logging.Logger, logging.Handler]] = [
+            (display_logger, display_file_handler),
+            (logging.getLogger(), root_file_handler),
+        ]
+        self._display_log_path = log_path
+        logger.info(f"Display logger configured: writing to {log_path}")
 
